@@ -4,10 +4,11 @@
 --
 -- Author:      Akash Mittal
 -- Create date: 2023-10-27
--- Version:     10.0
+-- Version:     10.1
 -- Description: This script defines the complete database schema for the Gokrishi
---              platform. Version 10.0 introduces a major architectural change
---              to support multiple legal business entities per seller account.
+--              platform. Version 10.1 enhances the multi-entity architecture by
+--              linking expenses to legal entities and improves data integrity with
+--              stricter foreign key policies and role-specific keys.
 --
 -- =============================================================================
 
@@ -301,7 +302,7 @@ CREATE TABLE `product_images` (
 CREATE TABLE `product_change_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `product_id` BIGINT UNSIGNED NOT NULL,
-  `requested_by_user_id` BIGINT UNSIGNED NOT NULL,
+  `requested_by_user_id` BIGINT UNSIGNED NULL,
   `change_type` ENUM('IMAGES', 'UNITS', 'DESCRIPTION', 'DETAILS') NOT NULL,
   `proposed_changes` JSON NOT NULL,
   `status` ENUM('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'APPLIED') NOT NULL DEFAULT 'PENDING_APPROVAL',
@@ -312,8 +313,8 @@ CREATE TABLE `product_change_requests` (
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`requested_by_user_id`) REFERENCES `users` (`id`),
-  FOREIGN KEY (`approved_by_user_id`) REFERENCES `users` (`id`)
+  FOREIGN KEY (`requested_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`approved_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Tracks proposed changes to master product data.';
 
 
@@ -325,13 +326,11 @@ CREATE TABLE `sellers` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` BIGINT UNSIGNED NOT NULL COMMENT 'The primary user account that owns and manages the seller profile.',
   `is_platform_admin` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Identifies this seller as the platform itself, used for internal billing to other sellers.',
-  `company_logo_url` VARCHAR(512) NULL COMMENT 'URL for the sellers company logo.',
-  `pan_number` VARCHAR(10) NULL COMMENT 'The sellers Permanent Account Number (for tax purposes).',
   `account_status` ENUM('PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED') NOT NULL DEFAULT 'PENDING_APPROVAL' COMMENT 'The operational status of the seller account.',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Core table for seller business profiles.';
 
 CREATE TABLE `seller_legal_entities` (
@@ -341,6 +340,8 @@ CREATE TABLE `seller_legal_entities` (
   `tally_guid` VARCHAR(255) NULL UNIQUE COMMENT 'GUID for Tally/Marg/Busy integration (Ledger for this entity).',
   `gst_number` VARCHAR(15) NULL UNIQUE COMMENT 'The Goods and Services Tax Identification Number for this entity.',
   `gst_state_id` INT UNSIGNED NULL COMMENT 'The state associated with the GST number.',
+  `pan_number` VARCHAR(10) NULL COMMENT 'The legal entity\'s Permanent Account Number (for tax purposes).',
+  `company_logo_url` VARCHAR(512) NULL COMMENT 'URL for this legal entity\'s company logo.',
   `is_default` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Indicates the default entity for new transactions and payments.',
   `address_line_1` VARCHAR(255) NULL,
   `address_line_2` VARCHAR(255) NULL,
@@ -455,7 +456,7 @@ CREATE TABLE `seller_customer_map` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_seller_user_customer` (`seller_id`, `user_id`),
   UNIQUE KEY `uk_seller_brand_customer` (`seller_id`, `brand_id`),
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`brand_id`) REFERENCES `brands` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`price_list_id`) REFERENCES `price_lists` (`id`) ON DELETE SET NULL,
@@ -476,7 +477,7 @@ CREATE TABLE `seller_staff` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_seller_user` (`seller_id`, `user_id`),
   FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links users as staff members to a seller.';
 
 CREATE TABLE `seller_staff_roles` (
@@ -702,16 +703,16 @@ CREATE TABLE `account_transfers` (
 
 CREATE TABLE `expense_categories` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `seller_id` BIGINT UNSIGNED NOT NULL,
+  `seller_legal_entity_id` BIGINT UNSIGNED NOT NULL,
   `name` VARCHAR(150) NOT NULL,
   `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE
+  FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Defines categories for seller expenses.';
 
 CREATE TABLE `expenses` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `seller_id` BIGINT UNSIGNED NOT NULL,
+  `seller_legal_entity_id` BIGINT UNSIGNED NOT NULL,
   `expense_category_id` BIGINT UNSIGNED NOT NULL,
   `amount` DECIMAL(12, 2) NOT NULL,
   `expense_date` DATE NOT NULL,
@@ -726,7 +727,7 @@ CREATE TABLE `expenses` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`),
   FOREIGN KEY (`paid_from_account_id`) REFERENCES `seller_accounts` (`id`),
   FOREIGN KEY (`incurred_by_staff_id`) REFERENCES `seller_staff` (`id`),
@@ -830,13 +831,13 @@ CREATE TABLE `cheque_deposits` (
   `total_amount` DECIMAL(12, 2) NOT NULL,
   `deposit_slip_image_url` VARCHAR(512) NULL,
   `status` ENUM('PENDING_CLEARANCE', 'COMPLETED', 'PARTIALLY_CLEARED', 'BOUNCED') NOT NULL,
-  `deposited_by_user_id` BIGINT UNSIGNED NOT NULL,
+  `deposited_by_staff_id` BIGINT UNSIGNED NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`deposited_into_account_id`) REFERENCES `seller_accounts` (`id`),
-  FOREIGN KEY (`deposited_by_user_id`) REFERENCES `users` (`id`)
+  FOREIGN KEY (`deposited_by_staff_id`) REFERENCES `seller_staff` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Manages batches of cheques for bank deposit.';
 
 CREATE TABLE `cheque_deposit_items` (
@@ -955,6 +956,6 @@ CREATE TABLE `financial_report_generations` (
   FOREIGN KEY (`generation_job_id`) REFERENCES `scheduled_jobs` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Logs the generation of financial reports for a specific legal entity.';
 
--- (Remaining tables are unchanged)
+-- (Remaining tables from Version 9.7 are unchanged and should be included here)
 
 SET foreign_key_checks = 1;
