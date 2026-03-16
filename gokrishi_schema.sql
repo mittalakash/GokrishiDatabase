@@ -2,21 +2,10 @@
 -- GOKRISHI E-COMMERCE PLATFORM DATABASE SCHEMA
 -- =============================================================================
 --
--- Author:      Akash Mittal, Partner, Ayaan Delivery Solutions LLP
--- Copyright:   Copyright (c) 2023-2024 Ayaan Delivery Solutions LLP. All Rights Reserved.
---
--- License:     This source code is the confidential and proprietary property of
---              Ayaan Delivery Solutions LLP. It is protected by copyright laws and
---              international treaty provisions. This code is licensed to you
---              for internal use only. Unauthorized reproduction, distribution,
---              or modification of this software, or any portion of it, may
---              result in severe civil and criminal penalties, and will be
---              prosecuted to the maximum extent possible under the law.
---
--- Version:     10.3
--- Description: This script defines the complete database schema for the Gokrishi
---              platform. Version 10.3 adds professional legal notices and
---              improves documentation for the multi-entity architecture.
+-- Version:     10.6
+-- Description: This version renames the `areas` table to `localities` for
+--              better clarity and alignment with the address data structure.
+--              The `addresses` table is updated accordingly.
 --
 -- =============================================================================
 
@@ -68,21 +57,29 @@ CREATE TABLE `states` (
   FOREIGN KEY (`country_id`) REFERENCES `countries` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reference table for states or provinces within countries.';
 
-CREATE TABLE `cities` (
+CREATE TABLE `districts` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(100) NOT NULL,
   `state_id` INT UNSIGNED NOT NULL,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`state_id`) REFERENCES `states` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reference table for cities within states.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reference table for districts within states.';
 
 CREATE TABLE `pincodes` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `pincode` VARCHAR(10) NOT NULL UNIQUE,
-  `city_id` INT UNSIGNED NOT NULL,
+  `district_id` INT UNSIGNED NOT NULL,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`city_id`) REFERENCES `cities` (`id`)
+  FOREIGN KEY (`district_id`) REFERENCES `districts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reference table for postal codes (pincodes).';
+
+CREATE TABLE `localities` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(100) NOT NULL COMMENT 'The name of the city, village, or post office area.',
+  `pincode_id` INT UNSIGNED NOT NULL,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`pincode_id`) REFERENCES `pincodes` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores localities (cities, villages, areas) within a pincode.';
 
 
 -- =============================================
@@ -160,14 +157,14 @@ CREATE TABLE `addresses` (
   `user_id` BIGINT UNSIGNED NOT NULL,
   `address_line_1` VARCHAR(255) NOT NULL,
   `address_line_2` VARCHAR(255) NULL,
-  `pincode_id` INT UNSIGNED NOT NULL,
+  `locality_id` INT UNSIGNED NOT NULL COMMENT 'Foreign key to the specific city, village, or locality.',
   `latitude` DECIMAL(10, 8) NULL,
   `longitude` DECIMAL(11, 8) NULL,
   `address_type` ENUM('BILLING', 'DELIVERY') NOT NULL,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`pincode_id`) REFERENCES `pincodes` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores physical addresses for users.';
+  FOREIGN KEY (`locality_id`) REFERENCES `localities` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores physical addresses for users, linked to a specific locality.';
 
 
 -- =============================================
@@ -348,21 +345,23 @@ CREATE TABLE `seller_legal_entities` (
   `tally_guid` VARCHAR(255) NULL UNIQUE COMMENT 'GUID for Tally/Marg/Busy integration (Ledger for this entity).',
   `gst_number` VARCHAR(15) NULL UNIQUE COMMENT 'The Goods and Services Tax Identification Number for this entity.',
   `gst_state_id` INT UNSIGNED NULL COMMENT 'The state associated with the GST number.',
-  `pan_number` VARCHAR(10) NULL COMMENT 'The legal entity\'s Permanent Account Number (for tax purposes).',
-  `company_logo_url` VARCHAR(512) NULL COMMENT 'URL for this legal entity\'s company logo.',
+  `pan_number` VARCHAR(10) NULL COMMENT 'The legal entity's Permanent Account Number (for tax purposes).',
+  `company_logo_url` VARCHAR(512) NULL COMMENT 'URL for this legal entity's company logo.',
   `is_default` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Indicates the default entity for new transactions and payments.',
   `address_line_1` VARCHAR(255) NULL,
   `address_line_2` VARCHAR(255) NULL,
-  `city_id` INT UNSIGNED NULL,
+  `locality_id` INT UNSIGNED NULL,
   `pincode_id` INT UNSIGNED NULL,
+  `district_id` INT UNSIGNED NULL,
   `state_id` INT UNSIGNED NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`seller_id`) REFERENCES `sellers`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`gst_state_id`) REFERENCES `states`(`id`),
-  FOREIGN KEY (`city_id`) REFERENCES `cities`(`id`),
+  FOREIGN KEY (`locality_id`) REFERENCES `localities`(`id`),
   FOREIGN KEY (`pincode_id`) REFERENCES `pincodes`(`id`),
+  FOREIGN KEY (`district_id`) REFERENCES `districts`(`id`),
   FOREIGN KEY (`state_id`) REFERENCES `states`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores the distinct legal company profiles (e.g., for different states or business units) associated with a single seller account. All invoicing, taxation, and financial reporting are segregated at this level.';
 
@@ -1094,21 +1093,21 @@ CREATE TABLE `voucher_entries` (
     `voucher_type_id` INT UNSIGNED NOT NULL,
     `seller_legal_entity_id` BIGINT UNSIGNED NOT NULL,
     `entry_date` DATE NOT NULL,
-    `narration` TEXT NULL,
-    PRIMARY KEY (`id`),
-    FOREIGN KEY (`voucher_type_id`) REFERENCES `voucher_types`(`id`),
-    FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities`(`id`)
+  `narration` TEXT NULL,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`voucher_type_id`) REFERENCES `voucher_types`(`id`),
+  FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Represents a single accounting voucher entry.';
 
 CREATE TABLE `voucher_entry_details` (
-    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `voucher_entry_id` BIGINT UNSIGNED NOT NULL,
-    `account_id` BIGINT UNSIGNED NOT NULL,
-    `entry_type` ENUM('DEBIT', 'CREDIT') NOT NULL,
-    `amount` DECIMAL(12, 2) NOT NULL,
-    PRIMARY KEY (`id`),
-    FOREIGN KEY (`voucher_entry_id`) REFERENCES `voucher_entries`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`account_id`) REFERENCES `seller_accounts`(`id`)
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `voucher_entry_id` BIGINT UNSIGNED NOT NULL,
+  `account_id` BIGINT UNSIGNED NOT NULL,
+  `entry_type` ENUM('DEBIT', 'CREDIT') NOT NULL,
+  `amount` DECIMAL(12, 2) NOT NULL,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`voucher_entry_id`) REFERENCES `voucher_entries`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`account_id`) REFERENCES `seller_accounts`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Details of debit/credit for a voucher entry.';
 
 
