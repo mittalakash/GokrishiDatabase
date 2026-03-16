@@ -4,11 +4,10 @@
 --
 -- Author:      Akash Mittal
 -- Create date: 2023-10-27
--- Version:     10.1
+-- Version:     10.2
 -- Description: This script defines the complete database schema for the Gokrishi
---              platform. Version 10.1 enhances the multi-entity architecture by
---              linking expenses to legal entities and improves data integrity with
---              stricter foreign key policies and role-specific keys.
+--              platform. Version 10.2 corrects the HR and Payroll logic by
+--              linking seller staff directly to their employing legal entity.
 --
 -- =============================================================================
 
@@ -465,8 +464,8 @@ CREATE TABLE `seller_customer_map` (
 
 CREATE TABLE `seller_staff` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `seller_id` BIGINT UNSIGNED NOT NULL,
-  `user_id` BIGINT UNSIGNED NOT NULL,
+  `seller_legal_entity_id` BIGINT UNSIGNED NOT NULL COMMENT 'The legal entity that employs this staff member.',
+  `user_id` BIGINT UNSIGNED NOT NULL COMMENT 'The user who is the staff member.',
   `salary_structure` ENUM('DAILY', 'MONTHLY', 'COMMISSION_BASED') NOT NULL DEFAULT 'MONTHLY',
   `daily_rate` DECIMAL(10, 2) NULL,
   `monthly_salary` DECIMAL(10, 2) NULL,
@@ -475,10 +474,10 @@ CREATE TABLE `seller_staff` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_seller_user` (`seller_id`, `user_id`),
-  FOREIGN KEY (`seller_id`) REFERENCES `sellers` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `uk_entity_user` (`seller_legal_entity_id`, `user_id`),
+  FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links users as staff members to a seller.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links users as staff members to a specific seller legal entity.';
 
 CREATE TABLE `seller_staff_roles` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
