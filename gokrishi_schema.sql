@@ -2,12 +2,21 @@
 -- GOKRISHI E-COMMERCE PLATFORM DATABASE SCHEMA
 -- =============================================================================
 --
--- Author:      Akash Mittal
--- Create date: 2023-10-27
--- Version:     10.2
+-- Author:      Akash Mittal, Partner, Ayaan Delivery Solutions LLP
+-- Copyright:   Copyright (c) 2023-2024 Ayaan Delivery Solutions LLP. All Rights Reserved.
+--
+-- License:     This source code is the confidential and proprietary property of
+--              Ayaan Delivery Solutions LLP. It is protected by copyright laws and
+--              international treaty provisions. This code is licensed to you
+--              for internal use only. Unauthorized reproduction, distribution,
+--              or modification of this software, or any portion of it, may
+--              result in severe civil and criminal penalties, and will be
+--              prosecuted to the maximum extent possible under the law.
+--
+-- Version:     10.3
 -- Description: This script defines the complete database schema for the Gokrishi
---              platform. Version 10.2 corrects the HR and Payroll logic by
---              linking seller staff directly to their employing legal entity.
+--              platform. Version 10.3 adds professional legal notices and
+--              improves documentation for the multi-entity architecture.
 --
 -- =============================================================================
 
@@ -330,7 +339,7 @@ CREATE TABLE `sellers` (
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Core table for seller business profiles.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Represents the core business account of a seller. This is the master record that owns multiple legal entities and centralized inventory. A new seller ID should be created for each new warehouse or physically separate inventory location.';
 
 CREATE TABLE `seller_legal_entities` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -355,7 +364,7 @@ CREATE TABLE `seller_legal_entities` (
   FOREIGN KEY (`city_id`) REFERENCES `cities`(`id`),
   FOREIGN KEY (`pincode_id`) REFERENCES `pincodes`(`id`),
   FOREIGN KEY (`state_id`) REFERENCES `states`(`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores legal company profiles associated with a seller account for billing purposes.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stores the distinct legal company profiles (e.g., for different states or business units) associated with a single seller account. All invoicing, taxation, and financial reporting are segregated at this level.';
 
 CREATE TABLE `seller_subscription_plans` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -477,7 +486,7 @@ CREATE TABLE `seller_staff` (
   UNIQUE KEY `uk_entity_user` (`seller_legal_entity_id`, `user_id`),
   FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links users as staff members to a specific seller legal entity.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links a user account to a specific legal entity as an employee. All payroll and HR functions are managed at this level, ensuring salary payments and expenses are booked to the correct company.';
 
 CREATE TABLE `seller_staff_roles` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -955,6 +964,151 @@ CREATE TABLE `financial_report_generations` (
   FOREIGN KEY (`generation_job_id`) REFERENCES `scheduled_jobs` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Logs the generation of financial reports for a specific legal entity.';
 
--- (Remaining tables from Version 9.7 are unchanged and should be included here)
+-- =============================================
+-- Section: Logistics & Delivery
+-- =============================================
+
+CREATE TABLE `delivery_vehicles` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `seller_id` BIGINT UNSIGNED NOT NULL,
+    `vehicle_number` VARCHAR(20) NOT NULL UNIQUE,
+    `vehicle_type` VARCHAR(50) NULL,
+    `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`seller_id`) REFERENCES `sellers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Manages the fleet of delivery vehicles for a seller.';
+
+CREATE TABLE `delivery_shifts` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `seller_id` BIGINT UNSIGNED NOT NULL,
+    `shift_name` VARCHAR(100) NOT NULL,
+    `start_time` TIME NOT NULL,
+    `end_time` TIME NOT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`seller_id`) REFERENCES `sellers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Defines the delivery shifts for a seller (e.g., Morning, Evening).';
+
+CREATE TABLE `delivery_routes` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `seller_id` BIGINT UNSIGNED NOT NULL,
+    `route_name` VARCHAR(150) NOT NULL,
+    `assigned_staff_id` BIGINT UNSIGNED NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`seller_id`) REFERENCES `sellers`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`assigned_staff_id`) REFERENCES `seller_staff`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Defines the delivery routes for a seller.';
+
+CREATE TABLE `delivery_loads` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `delivery_route_id` BIGINT UNSIGNED NOT NULL,
+    `delivery_vehicle_id` BIGINT UNSIGNED NOT NULL,
+    `delivery_shift_id` BIGINT UNSIGNED NOT NULL,
+    `load_date` DATE NOT NULL,
+    `status` ENUM('PENDING', 'LOADED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`delivery_route_id`) REFERENCES `delivery_routes`(`id`),
+    FOREIGN KEY (`delivery_vehicle_id`) REFERENCES `delivery_vehicles`(`id`),
+    FOREIGN KEY (`delivery_shift_id`) REFERENCES `delivery_shifts`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Represents a specific delivery load for a route, vehicle, and shift.';
+
+CREATE TABLE `delivery_load_items` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `delivery_load_id` BIGINT UNSIGNED NOT NULL,
+    `order_id` BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_load_order` (`delivery_load_id`, `order_id`),
+    FOREIGN KEY (`delivery_load_id`) REFERENCES `delivery_loads`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`order_id`) REFERENCES `orders`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Links individual orders to a delivery load.';
+
+-- =============================================
+-- Section: Supplier & Procurement
+-- =============================================
+
+CREATE TABLE `suppliers` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `seller_id` BIGINT UNSIGNED NOT NULL,
+    `supplier_name` VARCHAR(255) NOT NULL,
+    `contact_person` VARCHAR(255) NULL,
+    `mobile_number` VARCHAR(15) NULL,
+    `email_address` VARCHAR(255) NULL,
+    `gst_number` VARCHAR(15) NULL,
+    `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`seller_id`) REFERENCES `sellers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Manages the list of suppliers for a seller.';
+
+CREATE TABLE `purchase_orders` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `supplier_id` BIGINT UNSIGNED NOT NULL,
+    `order_date` DATE NOT NULL,
+    `expected_delivery_date` DATE NULL,
+    `status` ENUM('DRAFT', 'PLACED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED') NOT NULL DEFAULT 'DRAFT',
+    `total_amount` DECIMAL(12, 2) NOT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`supplier_id`) REFERENCES `suppliers`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Manages purchase orders placed with suppliers.';
+
+CREATE TABLE `purchase_order_items` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `purchase_order_id` BIGINT UNSIGNED NOT NULL,
+    `product_unit_id` BIGINT UNSIGNED NOT NULL,
+    `quantity` INT NOT NULL,
+    `rate` DECIMAL(10, 2) NOT NULL,
+    `amount` DECIMAL(12, 2) NOT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`purchase_order_id`) REFERENCES `purchase_orders`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`product_unit_id`) REFERENCES `product_units`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Individual line items within a purchase order.';
+
+-- =============================================
+-- Section: System & Background Jobs
+-- =============================================
+
+CREATE TABLE `scheduled_jobs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `job_type` VARCHAR(100) NOT NULL,
+    `payload` JSON NULL,
+    `status` ENUM('PENDING', 'RUNNING', 'COMPLETED', 'FAILED') NOT NULL DEFAULT 'PENDING',
+    `scheduled_at` TIMESTAMP NOT NULL,
+    `started_at` TIMESTAMP NULL,
+    `completed_at` TIMESTAMP NULL,
+    `failure_reason` TEXT NULL,
+    PRIMARY KEY (`id`),
+    INDEX `idx_job_status` (`status`, `scheduled_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='A queue for managing background jobs within the system.';
+
+-- =============================================
+-- Section: Accounting Vouchers (for Tally etc.)
+-- =============================================
+
+CREATE TABLE `voucher_types` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `name` VARCHAR(100) NOT NULL UNIQUE,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reference table for accounting voucher types.';
+
+CREATE TABLE `voucher_entries` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `voucher_type_id` INT UNSIGNED NOT NULL,
+    `seller_legal_entity_id` BIGINT UNSIGNED NOT NULL,
+    `entry_date` DATE NOT NULL,
+    `narration` TEXT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`voucher_type_id`) REFERENCES `voucher_types`(`id`),
+    FOREIGN KEY (`seller_legal_entity_id`) REFERENCES `seller_legal_entities`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Represents a single accounting voucher entry.';
+
+CREATE TABLE `voucher_entry_details` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `voucher_entry_id` BIGINT UNSIGNED NOT NULL,
+    `account_id` BIGINT UNSIGNED NOT NULL,
+    `entry_type` ENUM('DEBIT', 'CREDIT') NOT NULL,
+    `amount` DECIMAL(12, 2) NOT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`voucher_entry_id`) REFERENCES `voucher_entries`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`account_id`) REFERENCES `seller_accounts`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Details of debit/credit for a voucher entry.';
+
 
 SET foreign_key_checks = 1;
